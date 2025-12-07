@@ -174,9 +174,14 @@ if st.button("Analyze Food 🔍", type="primary"):
                 # Avoid division by zero
                 total_macro = total_pro + total_fat + total_carb
                 if total_macro > 0:
-                    st.progress(total_pro / total_macro, text=f"Protein: {total_pro:.1f}g")
-                    st.progress(total_fat / total_macro, text=f"Fat: {total_fat:.1f}g")
-                    st.progress(total_carb / total_macro, text=f"Carbs: {total_carb:.1f}g")
+                    st.write(f"**Protein:** {total_pro:.1f}g")
+                    st.progress(total_pro / total_macro)
+                    
+                    st.write(f"**Fat:** {total_fat:.1f}g")
+                    st.progress(total_fat / total_macro)
+                    
+                    st.write(f"**Carbs:** {total_carb:.1f}g")
+                    st.progress(total_carb / total_macro)
                 else:
                     st.write("No macronutrients detected.")
 
