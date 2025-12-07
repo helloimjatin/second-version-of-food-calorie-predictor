@@ -52,15 +52,16 @@ data = load_model()
 
 # --- 3. HELPER FUNCTIONS ---
 def get_prediction(dish_name, diet_type):
-    if not data: return None
+    if not data: 
+        return None
     
     # Prepare input dataframe
     input_df = pd.DataFrame({
-        'combined_text': [dish_name], # We don't have ingredients, so we just use name
+        'combined_text': [dish_name],
         'Diet_Type': [diet_type],
-        'raw_ingredients': [dish_name], # Fallback to using name as ingredient text
+        'raw_ingredients': [dish_name],
         'dish_name_length': [len(dish_name)],
-        'match_score_normalized': [0.5] # Neutral score for fresh prediction
+        'match_score_normalized': [0.5]
     })
     
     # Transform features
@@ -72,31 +73,40 @@ def get_prediction(dish_name, diet_type):
     
     results = {}
     
-    # Predict each target
-    for target in data['target_names']:
+    # Predict each target (skip Calories, we'll calculate it)
+    for target in ['Protein_100g', 'Fat_100g', 'Carbs_100g']:
         model = data['models'].get(target)
         
-        # Handle special 'Fat' log transformation if it exists
-        if target == 'Fat_100g' and 'Fat_100g_log_transform' in data['models']:
-             # If your training script saved the base model, we might need manual predict
-             # But usually pipeline handles it. Let's assume standard predict for now.
-             pred = model.predict(X_processed)[0]
-             # If log transformed, we need to expm1 it back? 
-             # The training script logic for 'Fat' used a log transform manually before fitting.
-             # If the model saved is just the XGBRegressor, it will output LOG values.
-             # We need to reverse it.
-             pred = np.expm1(pred)
-        else:
-             pred = model.predict(X_processed)[0]
-        
-        # Clip negatives
-        results[target] = max(0.1, pred)
+        try:
+            # Handle special 'Fat' log transformation if it exists
+            if target == 'Fat_100g' and 'Fat_100g_log_transform' in data['models']:
+                pred = model.predict(X_processed)[0]
+                pred = np.expm1(pred)  # Reverse log transform
+            else:
+                pred = model.predict(X_processed)[0]
+            
+            # Ensure valid number and clip to realistic range
+            if np.isnan(pred) or np.isinf(pred):
+                pred = 0.0
+            
+            # Clip to realistic ranges
+            if target == 'Protein_100g':
+                pred = np.clip(pred, 0, 30)
+            elif target == 'Fat_100g':
+                pred = np.clip(pred, 0, 100)
+            elif target == 'Carbs_100g':
+                pred = np.clip(pred, 0, 100)
+            
+            results[target] = float(pred)
+            
+        except Exception as e:
+            st.error(f"Error predicting {target}: {e}")
+            results[target] = 0.0
 
-    # Calculate Calories from macros if flag is set
-    if data.get('use_calorie_formula'):
-        results['Calories_100g'] = (results['Protein_100g'] * 4) + \
-                                   (results['Fat_100g'] * 9) + \
-                                   (results['Carbs_100g'] * 4)
+    # Calculate Calories from macros (standard formula)
+    results['Calories_100g'] = (results['Protein_100g'] * 4) + \
+                               (results['Fat_100g'] * 9) + \
+                               (results['Carbs_100g'] * 4)
         
     return results
 
@@ -154,7 +164,6 @@ if st.button("Analyze Food 🔍", type="primary"):
 
         if vals:
             # 2. Calculate Totals based on Quantity
-            # FIX: Ensure factor is defined before use
             factor = quantity_g / 100
             
             total_cal = vals['Calories_100g'] * factor
@@ -171,21 +180,29 @@ if st.button("Analyze Food 🔍", type="primary"):
                 
             with col_b:
                 st.write("#### Macro Breakdown")
-                # Avoid division by zero
+                # Calculate total and validate
                 total_macro = total_pro + total_fat + total_carb
+                
                 if total_macro > 0:
-                    st.write(f"**Protein:** {total_pro:.1f}g")
-                    st.progress(total_pro / total_macro)
+                    # Calculate percentages (ensure they're valid floats between 0 and 1)
+                    protein_pct = max(0.0, min(1.0, float(total_pro / total_macro)))
+                    fat_pct = max(0.0, min(1.0, float(total_fat / total_macro)))
+                    carb_pct = max(0.0, min(1.0, float(total_carb / total_macro)))
                     
-                    st.write(f"**Fat:** {total_fat:.1f}g")
-                    st.progress(total_fat / total_macro)
+                    st.write(f"**Protein:** {total_pro:.1f}g ({protein_pct*100:.0f}%)")
+                    st.progress(protein_pct)
                     
-                    st.write(f"**Carbs:** {total_carb:.1f}g")
-                    st.progress(total_carb / total_macro)
+                    st.write(f"**Fat:** {total_fat:.1f}g ({fat_pct*100:.0f}%)")
+                    st.progress(fat_pct)
+                    
+                    st.write(f"**Carbs:** {total_carb:.1f}g ({carb_pct*100:.0f}%)")
+                    st.progress(carb_pct)
                 else:
-                    st.write("No macronutrients detected.")
+                    st.warning("⚠️ Unable to calculate macronutrients. Please try a different dish.")
 
             # 4. Ingredients Hint
             if db_match is not None and pd.notna(db_match.get('Ingredients')):
                  with st.expander("See Ingredients"):
                      st.write(db_match['Ingredients'])
+        else:
+            st.error("❌ Unable to generate prediction. Please try again.")
